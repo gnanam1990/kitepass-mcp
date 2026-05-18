@@ -1,0 +1,12 @@
+{
+  "_comment": "Claude Desktop MCP configuration for KitePass",
+  "_macos_path": "~/Library/Application Support/Claude/claude_desktop_config.json",
+  "_windows_path": "%APPDATA%\\Claude\\claude_desktop_config.json",
+  "_linux_path": "~/.config/Claude/claude_desktop_config.json",
+  "mcpServers": {
+    "kitepass": {
+      "command": "npx",
+      "args": ["@kitepass/mcp-server"]
+    }
+  }
+}
