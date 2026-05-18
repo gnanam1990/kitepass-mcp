@@ -1,10 +1,15 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { writeFile, unlink } from "node:fs/promises";
+import { tmpdir, homedir } from "node:os";
+import { join } from "node:path";
+import { randomBytes } from "node:crypto";
 
 const execFileAsync = promisify(execFile);
 
 const KPASS_BINARY = process.env.KPASS_BINARY_PATH || "kpass";
 const DEFAULT_TIMEOUT_MS = 30_000;
+const LONG_TIMEOUT_MS = 300_000;
 
 export class KpassError extends Error {
   constructor(
@@ -25,18 +30,17 @@ export async function callKpass<T = unknown>(
   try {
     const { stdout, stderr } = await execFileAsync(
       KPASS_BINARY,
-      [...args, "--output", "json"],
+      [...args, "--output", "json", "--no-interactive"],
       {
         timeout,
         maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env },
+        cwd: homedir(),
       },
     );
 
     if (stderr && !stdout) {
-      throw new KpassError(
-        sanitizeKpassError(stderr),
-        "KPASS_STDERR",
-      );
+      throw new KpassError(sanitizeKpassError(stderr), "KPASS_STDERR");
     }
 
     let parsed: unknown;
@@ -74,6 +78,35 @@ export async function callKpass<T = unknown>(
       sanitizeKpassError(error.message || String(err)),
       "KPASS_EXEC_ERROR",
     );
+  }
+}
+
+export async function callKpassLong<T = unknown>(
+  args: string[],
+  options: { timeoutMs?: number } = {},
+): Promise<T> {
+  const timeout = Math.min(options.timeoutMs ?? LONG_TIMEOUT_MS, LONG_TIMEOUT_MS);
+  return callKpass<T>(args, { timeoutMs: timeout });
+}
+
+export async function writeTempJsonFile(data: unknown): Promise<string> {
+  const filePath = join(tmpdir(), `kpass-body-${randomBytes(8).toString("hex")}.json`);
+  await writeFile(filePath, JSON.stringify(data), "utf-8");
+  setTimeout(() => {
+    unlink(filePath).catch(() => {});
+  }, 60_000);
+  return filePath;
+}
+
+export function isUrlSafe(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return false;
+    if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") return false;
+    if (parsed.hostname.endsWith(".local")) return false;
+    return true;
+  } catch {
+    return false;
   }
 }
 

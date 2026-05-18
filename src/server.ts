@@ -10,12 +10,20 @@ import * as userTool from "./tools/user.js";
 import * as sessionsTool from "./tools/sessions.js";
 import * as walletTool from "./tools/wallet.js";
 import * as healthTool from "./tools/health.js";
+import * as createSessionTool from "./tools/create-session.js";
+import * as checkSessionTool from "./tools/check-session.js";
+import * as executePaymentTool from "./tools/execute-payment.js";
+import * as listAgentsTool from "./tools/list-agents.js";
 
 const TOOLS = {
   [userTool.definition.name]: userTool,
   [sessionsTool.definition.name]: sessionsTool,
   [walletTool.definition.name]: walletTool,
   [healthTool.definition.name]: healthTool,
+  [createSessionTool.definition.name]: createSessionTool,
+  [checkSessionTool.definition.name]: checkSessionTool,
+  [executePaymentTool.definition.name]: executePaymentTool,
+  [listAgentsTool.definition.name]: listAgentsTool,
 };
 
 const server = new Server(
