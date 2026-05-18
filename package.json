@@ -1,0 +1,39 @@
+{
+  "name": "@kitepass/mcp-server",
+  "version": "0.1.0-alpha.1",
+  "description": "Model Context Protocol server for Kite Agent Passport — exposes kpass operations as tools for LLM agents",
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": {
+    "kitepass-mcp": "dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "node dist/server.js"
+  },
+  "keywords": [
+    "mcp",
+    "kite",
+    "kite-mainnet",
+    "kpass",
+    "agent-payment",
+    "x402",
+    "anthropic"
+  ],
+  "author": "Gnanam <github.com/gnanam1990>",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3",
+    "zod-to-json-schema": "^3.25.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "tsx": "^4.22.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
+  }
+}
