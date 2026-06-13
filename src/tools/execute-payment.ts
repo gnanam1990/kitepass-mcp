@@ -73,6 +73,29 @@ export async function handler(input: unknown): Promise<unknown> {
       };
     }
 
+    // Fail closed: callKpass already throws on { status: "error" }, but the
+    // execute subcommand can return a structured envelope where the request or
+    // payment failed without that top-level error status (e.g. success: false,
+    // a non-"success" status, or an explicit error/error_reason). Treat any
+    // affirmative failure signal as a failure instead of hardcoding success.
+    const errorReason =
+      raw.error ?? raw.error_reason ?? raw.errorReason;
+    const failed =
+      raw.success === false ||
+      (raw.status !== undefined && raw.status !== "success") ||
+      errorReason != null;
+
+    if (failed) {
+      return ExecutePaymentOutput.parse({
+        success: false,
+        http_status: Number(httpResp.status ?? raw.http_status ?? 0),
+        response_headers: (httpResp.headers ?? raw.response_headers ?? {}) as Record<string, string>,
+        response_body: httpResp.body ?? raw.response_body ?? null,
+        payment,
+        error: errorReason != null ? String(errorReason) : "kpass reported payment failure",
+      });
+    }
+
     return ExecutePaymentOutput.parse({
       success: true,
       http_status: Number(httpResp.status ?? raw.http_status ?? 200),
