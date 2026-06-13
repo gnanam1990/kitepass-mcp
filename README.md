@@ -1,46 +1,81 @@
-# @kitepass/mcp-server
+# KitePass MCP Server
 
-> Model Context Protocol server for Kite Agent Passport. Give Claude, GPT, or any MCP-aware LLM the ability to authenticate, manage sessions, and execute x402 payments on Kite Mainnet.
+> A Model Context Protocol (MCP) server that exposes Kite Agent Passport payment operations as tools for MCP-aware LLM agents.
 
----
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6.svg)](./tsconfig.json)
+[![Test](https://github.com/gnanam1990/kitepass-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/gnanam1990/kitepass-mcp/actions/workflows/test.yml)
 
-## What this is
+## Overview
 
-KitePass MCP Server is an open-source implementation of an MCP server that bridges LLM agents with Kite's agent payment infrastructure. It wraps the [kpass CLI](https://github.com/gnanam1990/kitepassport) operations as callable MCP tools, enabling any MCP-aware AI assistant to:
+KitePass MCP Server bridges MCP-aware LLM agents with Kite's agent payment infrastructure. It wraps the [`kpass` CLI](https://github.com/gnanam1990/kitepassport) as a set of callable MCP tools, so an assistant can check balances, manage agent spending sessions, and execute x402 payments on Kite Mainnet through a structured, validated interface.
 
-- Check wallet balances on Kite Mainnet
-- Create and manage agent spending sessions
-- Execute x402 micropayments to paid APIs
-- List registered agents and their status
+The server runs locally over stdio and spawns a fresh `kpass` subprocess per tool call — it holds no long-running state. It is a community-built project, not officially endorsed by the Kite Foundation.
 
-This is a community-built project, not officially endorsed by Anthropic or the Kite Foundation.
+## Features
 
-## Quick start
+- 8 MCP tools wrapping `kpass` CLI operations (read and write).
+- Zod-validated tool inputs and outputs; tool input schemas are published to clients as JSON Schema.
+- Human-in-the-loop writes: session creation returns an approval URL that the user must open and approve; the agent cannot self-approve.
+- SSRF-guarded payment execution: only `https://` URLs are allowed, and `localhost`, `127.0.0.1`, and `*.local` hosts are rejected (enforced both in the Zod schema and a runtime check).
+- Fail-closed payment handling: any affirmative failure signal from `kpass` (`success: false`, a non-`success` status, or an error reason) is surfaced as a failed result rather than assumed success.
+- Error sanitization: outputs that mention token/JWT/session/bearer/authorization details are redacted before being returned.
+- Timeouts on every operation (30s default; up to 5min for payment execution).
 
-### 1. Install
+## Tech stack
+
+- **Language:** TypeScript (strict mode), compiled to ESM, Node.js >= 18.
+- **MCP:** [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk) over stdio transport.
+- **Validation:** `zod` with `zod-to-json-schema` for publishing tool input schemas.
+- **Tooling:** `tsc` (build), `tsx` (dev), `vitest` (tests).
+
+## Architecture
+
+```
+MCP client  ──▶  KitePass MCP server  ──▶  kpass CLI (subprocess)  ──▶  Kite Passport backend
+```
+
+- `src/server.ts` — registers tools and handles MCP `ListTools` / `CallTool` requests over stdio.
+- `src/kpass-bridge.ts` — spawns `kpass` via `execFile`, parses JSON output, enforces timeouts, sanitizes errors, and provides the URL-safety check.
+- `src/schemas.ts` — Zod input/output schemas for every tool.
+- `src/tools/*.ts` — one module per tool (`definition` + `handler`).
+- `src/utils/zod-to-json.ts` — converts Zod schemas to JSON Schema for tool definitions.
+
+## Getting started
+
+### Prerequisites
+
+- Node.js >= 18
+- The [`kpass` CLI](https://github.com/gnanam1990/kitepassport), installed and logged in:
+  ```bash
+  kpass login --email you@example.com
+  kpass me   # should show your user info
+  ```
+
+### Installation
 
 ```bash
 npm install -g @kitepass/mcp-server
 ```
 
-### 2. Prerequisites
+Or run from source:
 
-- Node 18+
-- [kpass CLI](https://github.com/gnanam1990/kitepassport) installed and logged in
-  ```bash
-  kpass login --email your@email.com
-  kpass me  # should show your user info
-  ```
+```bash
+git clone https://github.com/gnanam1990/kitepass-mcp
+cd kitepass-mcp
+npm install
+npm run build
+```
 
-### 3. Configure Claude Desktop
+### Configuration
 
-Add to your Claude Desktop config file:
+The MCP server reads one environment variable directly; the rest of the calling environment is passed through to the `kpass` subprocess, which reads its own configuration.
 
-| OS | Path |
-|---|---|
-| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
-| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
-| Linux | `~/.config/Claude/claude_desktop_config.json` |
+| Env var | Default | Purpose |
+|---|---|---|
+| `KPASS_BINARY_PATH` | `kpass` (resolved on `PATH`) | Override the location of the `kpass` binary the server spawns. |
+
+Add the server to an MCP client config. Example for a stdio client (see [`examples/claude-desktop.json`](./examples/claude-desktop.json)):
 
 ```json
 {
@@ -53,86 +88,64 @@ Add to your Claude Desktop config file:
 }
 ```
 
-### 4. Restart Claude Desktop
-
-You can now ask Claude:
-- "What's my Kite wallet balance?"
-- "Show me my active sessions"
-- "Create a $0.01 session for one hour"
-- "List the agents I have registered"
-
-## Available tools
-
-| Tool | Description | Type |
-|---|---|---|
-| `kpass_get_user` | Current logged-in user info | Read |
-| `kpass_list_sessions` | Active/pending/expired agent sessions | Read |
-| `kpass_get_wallet_balance` | KITE + USDC.e balance | Read |
-| `kpass_health_check` | Kite Passport backend health | Read |
-| `kpass_create_session` | Create spending session (returns approval URL) | Write |
-| `kpass_check_session_status` | Poll session approval state | Read |
-| `kpass_execute_payment` | Execute x402 payment via approved session | Write |
-| `kpass_list_agents` | List registered agents | Read |
-
-## Architecture
-
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐     ┌────────────────┐
-│  Claude Desktop │────▶│  KitePass MCP    │────▶│  kpass CLI      │────▶│  Kite Passport │
-│  (MCP Client)   │◀────│  Server          │◀────│  (subprocess)   │◀────│  Backend       │
-└─────────────────┘     └──────────────────┘     └─────────────────┘     └────────────────┘
-```
-
-The MCP server runs as a local subprocess of Claude Desktop. Each tool call spawns a fresh `kpass` subprocess, executes the operation, and returns the result. No long-running processes or state is maintained between calls.
-
-## Security model
-
-- **Identity:** The MCP server runs with the user's kpass identity. All operations are performed as the logged-in user.
-- **Write operations:** Creating sessions and executing payments require an approved session. The approval URL must be opened by the human user — the AI cannot approve sessions itself.
-- **No token exposure:** JWT tokens and session secrets are never included in tool outputs. Error messages are sanitized.
-- **URL validation:** Payment execution refuses non-HTTPS URLs, localhost, and local network addresses.
-- **Timeout protection:** All operations have timeouts (30s default, 5min max for payments).
-
-## Configuration
-
-| Env var | Default | Purpose |
-|---|---|---|
-| `KPASS_BINARY_PATH` | (PATH lookup) | Override kpass binary location |
-| `KITE_PASSPORT_BASE_URL` | `https://passport.prod.gokite.ai` | Override Kite Passport backend URL |
-
-## Examples
-
-See the [examples/](./examples/) directory for:
-- `claude-desktop.json` — Claude Desktop configuration
-- `basic-agent.ts` — Using MCP from a custom agent
-- `payment-flow.ts` — End-to-end payment example
-
-## Development
+### Running
 
 ```bash
-git clone https://github.com/gnanam1990/kitepass-mcp
-cd kitepass-mcp
-npm install
-npm run build
-npm test
+npm run dev     # watch mode (tsx)
+npm start       # run the built server (dist/server.js)
 ```
 
-## Roadmap
+The server communicates over stdio; it is intended to be launched by an MCP client rather than run interactively.
 
-- **v0.1:** 8 read/write tools, stdio transport, Claude Desktop integration (current)
-- **v0.2:** HTTP transport, observability tools, batch operations
-- **v0.3:** Multi-user / hosted mode
+## Usage
 
-## Contributing
+The server exposes the following tools:
 
-Issues and PRs welcome. Please run `npm test` before submitting.
+| Tool | Type | Description |
+|---|---|---|
+| `kpass_get_user` | Read | Current logged-in user (email, user ID, login status). |
+| `kpass_list_sessions` | Read | Agent sessions, filterable by `active` / `pending` / `expired`. |
+| `kpass_get_wallet_balance` | Read | KITE and USDC.e balances for the user's (or a given) address. |
+| `kpass_health_check` | Read | Kite Passport backend health (status, latency, version). |
+| `kpass_list_agents` | Read | Registered agents (IDs, types, names, status). |
+| `kpass_create_session` | Write | Create a spending session; returns an approval URL the user must open. |
+| `kpass_check_session_status` | Read | Poll the approval state of a pending session request. |
+| `kpass_execute_payment` | Write | Execute an HTTP request through an approved session; `kpass` handles x402 negotiation and settlement. |
 
-## Credits
+A typical write flow:
 
-Built by [Gnanam (@0x_art)](https://twitter.com/0x_art).
+1. `kpass_create_session` with spending limits (`max_amount_per_tx`, `max_total_amount`, `ttl`, `task_summary`) — returns a `request_id` and `approval_url`.
+2. The user opens `approval_url` and approves the session.
+3. `kpass_check_session_status` with the `request_id` until it reports `approved` (yielding a `session_id`).
+4. `kpass_execute_payment` with the `session_id` and a target `https://` URL.
 
-Thanks to the Kite Foundation and Anthropic teams for the foundational tooling.
+## Testing
+
+```bash
+npm test          # vitest run
+npm run test:watch
+```
+
+Tests live in `tests/tools.test.ts` and mock the `kpass` bridge, so no real `kpass` binary or network access is required. They exercise the per-tool input/output transformation logic, including the fail-closed payment path and error sanitization.
+
+## Project structure
+
+```
+src/
+  server.ts          # MCP server entry point (stdio)
+  kpass-bridge.ts    # kpass subprocess bridge, timeouts, URL safety, error sanitization
+  schemas.ts         # Zod input/output schemas
+  tools/             # one module per MCP tool
+  utils/zod-to-json.ts
+tests/tools.test.ts  # vitest unit tests (kpass bridge mocked)
+examples/
+  claude-desktop.json  # sample MCP client configuration
+```
+
+## Status
+
+Early / preview (`v0.1.0`). The 8 tools, Zod validation, stdio transport, SSRF guard, and fail-closed payment handling are implemented and unit-tested with the `kpass` bridge mocked. The server has no built-in tests that exercise a live backend; correct end-to-end behavior depends on a working, logged-in `kpass` CLI and the Kite Passport backend. Transport is stdio only.
 
 ## License
 
-MIT
+MIT — see [LICENSE](./LICENSE).
